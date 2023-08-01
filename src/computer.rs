@@ -4,9 +4,9 @@ use std::num::Wrapping;
 use crate::memory::Memory;
 use crate::disk::Disk;
 use crate::opcodes::Opcode;
-use crate::parser::{Parser, Type, Selection};
+use crate::parser::{Parser, Type, Selection, ParserError};
 use crate::port::Port;
-use crate::interrupts::InterruptVec;
+use crate::interrupts::{Interrupt, InterruptVec};
 
 macro_rules! get_op{($s:expr,$p:expr,$b:expr) => { $s.get_operand($b, $p)? }}
 macro_rules! set_op{($s:expr,$p:expr,$b:expr,$v:expr) => { $s.set_operand($b, $p, $v)? }}
@@ -42,7 +42,8 @@ pub enum CPUError {
 	IOPortAccessError(usize),
 	SetImmutableOperand,
 	GetEmptyOperand,
-	IVTAccessError(usize)
+	IVTAccessError(usize),
+	InvalidOpcode,
 }
 
 impl Computer {
@@ -79,15 +80,53 @@ impl Computer {
 		self.sp = 0x02FF;
 	}
 
-	pub fn tick(&mut self) -> Result<(), CPUError> {
+	pub fn tick(&mut self) {
+		if let Err(tick_err) = self.tick_internal() {
+			let irq_creation = match tick_err {
+				CPUError::MemoryAccessError(address) => {
+					self.ax = 0;
+					self.irq(Interrupt::MachineCheck as u8)
+				},
+
+				CPUError::IOPortAccessError(port_number) => {
+					self.ax = 1;
+					self.irq(Interrupt::MachineCheck as u8)
+				},
+
+				CPUError::IVTAccessError(iv_entry) => {
+					self.ax = 2; // should be NMI
+					self.irq(Interrupt::MachineCheck as u8)
+				},
+
+				CPUError::SetImmutableOperand |
+				CPUError::GetEmptyOperand |
+				CPUError::InvalidOpcode => {
+					self.irq(Interrupt::InvalidOpcode as u8)
+				}
+			};
+
+			if irq_creation.is_err() {
+				todo!("nmi, double, triple faults");
+			}
+		}
+	}
+
+	#[inline(always)]
+	fn tick_internal(&mut self) -> Result<(), CPUError> {
 		let byte_1 = self.memory.data.get(self.ip as usize);
 		let byte_2 = self.memory.data.get(self.ip as usize + 1);
 		let byte_3 = self.memory.data.get(self.ip as usize + 2);
 
 		let parse_result = Parser::new(byte_1, byte_2, byte_3);
 		if parse_result.is_err() {
-			self.ax = 0;
-			todo!("Do irq bus_error");
+			return Err(match parse_result.unwrap_err() {
+				ParserError::BusErrorOccurred(address) => {
+					CPUError::MemoryAccessError(address)
+				},
+				ParserError::UnexpectedLength(actual) => {
+					todo!("unexpected instruction length")
+				}
+			});
 		}
 
 		let parsed = parse_result.unwrap();
@@ -158,7 +197,7 @@ impl Computer {
 					},
 
 					_ => {
-						todo!("do irq illegal instruction");
+						return Err(CPUError::InvalidOpcode);
 					}
 				}
 			},
@@ -180,7 +219,7 @@ impl Computer {
 					},
 
 					_ => {
-						todo!("do irq illegal instruction");
+						return Err(CPUError::InvalidOpcode);
 					}
 				}
 			},
@@ -205,7 +244,7 @@ impl Computer {
 						}
 
 						_ => {
-							todo!("Do irq invalid_opcode");
+							return Err(CPUError::InvalidOpcode);
 						},
 					};
 

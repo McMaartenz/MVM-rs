@@ -23,8 +23,6 @@ fn main() {
     computer.boot();
 
     while computer.running {
-        if let Err(tick) = computer.tick() {
-            println!("Tick error: {:?}", tick);
-        }
+        computer.tick();
     }
 }
