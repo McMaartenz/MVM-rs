@@ -120,6 +120,67 @@ impl Computer {
 				self.set_flags(c.0);
 			},
 
+			Opcode::ADD => {
+				let a = get_op_1!(self, &parsed) as u16;
+				let b = get_op_2!(self, &parsed) as u16;
+
+				let c = Wrapping(a) + Wrapping(b);
+				set_op_1!(self, &parsed, c.0 as u8);
+				self.set_flags(c.0);
+			},
+
+			Opcode::PUSH => {
+				match parsed.selection {
+					Selection::RegReg |
+					Selection::RegIm8 |
+					Selection::MemReg |
+					Selection::RegMem => {
+						let val: u16 =
+							(get_op_1!(self, &parsed) as u16) << 8 |
+							get_op_2!(self, &parsed) as u16;
+
+						self.memory.set(self.sp as usize, (val >> 8) as u8)?;
+						self.memory.set(self.sp as usize + 1, val as u8)?;
+						self.sp -= 2;
+					},
+
+					Selection::JustMem |
+					Selection::JustReg |
+					Selection::JustIm8 => {
+						let val: u8 = get_op_1!(self, &parsed);
+					
+						self.memory.set(self.sp.into(), val)?;
+						self.sp -= 1;
+					},
+
+					_ => {
+						todo!("do irq illegal instruction");
+					}
+				}
+			},
+
+			Opcode::POP => {
+				match parsed.selection {
+					Selection::RegReg |
+					Selection::MemReg |
+					Selection::RegMem => {
+						set_op_1!(self, &parsed, self.memory.get(self.sp as usize)?);
+						set_op_2!(self, &parsed, self.memory.get(self.sp as usize + 1)?);
+						self.sp += 2;
+					},
+
+					Selection::JustMem |
+					Selection::JustReg => {
+						set_op_1!(self, &parsed, self.memory.get(self.sp.into())?);
+						self.sp += 1;
+					},
+
+					_ => {
+						todo!("do irq illegal instruction");
+					}
+				}
+			},
+
 			Opcode::JNZ => {
 				if (self.flags & 0b1000_0000) == 0 {
 					let jump_address: u16 = match parsed.selection {
@@ -243,15 +304,7 @@ impl Computer {
 			},
 			Type::Constant => Err(CPUError::SetImmutableOperand),
 			Type::Address => {
-				let address = parsed.address as usize;
-				let satisfies_bounds = address < self.memory.size;
-				
-				if !satisfies_bounds {
-					return Err(CPUError::MemoryAccessError(address));
-				}
-				
-				self.memory.data[address] = value;
-				Ok(())
+				self.memory.set(parsed.address.into(), value)
 			},
 			_ => Err(CPUError::SetImmutableOperand)
 		}

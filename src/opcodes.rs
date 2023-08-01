@@ -1,12 +1,12 @@
 #[derive(Debug)]
 pub enum Opcode {
-	MOV,
-	HLT,
-	IN,
-	OUT,
-	JNZ,
-	ADD,
-	SUB,
+	MOV, //x
+	HLT, //x
+	IN,  //x
+	OUT, //x
+	JNZ, //x
+	ADD, //x
+	SUB, //x
 	PUSH,
 	POP,
 	INT
