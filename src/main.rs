@@ -5,6 +5,7 @@ mod disk;
 mod port;
 mod opcodes;
 mod serial;
+mod interrupts;
 
 use std::path::Path;
 

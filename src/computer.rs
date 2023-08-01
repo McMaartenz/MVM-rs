@@ -6,6 +6,7 @@ use crate::disk::Disk;
 use crate::opcodes::Opcode;
 use crate::parser::{Parser, Type, Selection};
 use crate::port::Port;
+use crate::interrupts::InterruptVec;
 
 macro_rules! get_op{($s:expr,$p:expr,$b:expr) => { $s.get_operand($b, $p)? }}
 macro_rules! set_op{($s:expr,$p:expr,$b:expr,$v:expr) => { $s.set_operand($b, $p, $v)? }}
@@ -20,6 +21,7 @@ pub struct Computer {
 	pub memory: Memory,
 	pub disk: Disk,
 	pub io: HashMap<usize, Port>,
+	pub ivt: Vec<InterruptVec>,
 	
 	pub running: bool,
 
@@ -40,6 +42,7 @@ pub enum CPUError {
 	IOPortAccessError(usize),
 	SetImmutableOperand,
 	GetEmptyOperand,
+	IVTAccessError(usize)
 }
 
 impl Computer {
@@ -50,6 +53,7 @@ impl Computer {
 			memory,
 			disk,
 			io: HashMap::new(),
+			ivt: Vec::new(),
 			running: false,
 			ip: 0,
 			sp: 0,
@@ -214,14 +218,32 @@ impl Computer {
 				self.running = false;
 			},
 
-			_ => {
-				self.running = false;
-				println!("Instruction not implemented");
+			Opcode::INT => {
+				let n = get_op_1!(self, &parsed);
+				let res = self.irq(n);
+
+				if res.is_err() {
+					return res;
+				}
 			}
 		}
 
 		self.ip += parsed.length as u16;
 		Ok(())
+	}
+
+	fn irq(&mut self, int_number: u8) -> Result<(), CPUError> {
+		self.memory.set(self.sp as usize, self.ip as u8)?;
+		self.memory.set(self.sp as usize + 1, (self.ip >> 8) as u8)?;
+		self.sp -= 2;
+		
+		return if let Some(iv) = self.ivt.get(int_number as usize) {
+			self.ip = iv.address as u16;
+			Ok(())
+		}
+		else {
+			Err(CPUError::IVTAccessError(int_number.into()))
+		}
 	}
 
 	fn set_flags(&mut self, value: u16) {
